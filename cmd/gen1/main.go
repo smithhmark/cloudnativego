@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"example.com/gorilla/internal/gen1"
+	"example.com/gorilla/internal/tlog"
 
 	"github.com/gorilla/mux"
 )
@@ -68,7 +69,39 @@ func deleteHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func initializeTransactionLogFile() error {
+	var err error
+
+	logger, err := tlog.NewFileTransationLogger("transaction.log")
+	if err != nil {
+		return fmt.Errorf("failed to create event logger: %w", err)
+	}
+
+	events, errors := logger.ReadEvents()
+
+	e := tlog.Event{}
+	ok := true
+
+	for ok && err == nil {
+		select {
+		case err, ok = <-errors:
+		case e, ok = <-events:
+			switch e.EventType {
+			case tlog.EventDelete:
+				err = gen1.Delete(e.Key)
+			case tlog.EventPut:
+				err = gen1.Put(e.Key, e.Value)
+			}
+		}
+	}
+
+	logger.Run()
+
+	return err
+}
+
 func main() {
+	initializeTransactionLogFile()
 	r := mux.NewRouter()
 
 	r.HandleFunc("/", helloMuxHandler)
